@@ -29,7 +29,9 @@ export default function Board() {
         <div style={{ flex:1 }}>
           <h3>{opp.name} — ❤️ {opp.life}</h3>
           <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-            {(opp.battlefield || []).map(c => <Card key={c.id} card={c} />)}
+            {(opp.battlefield || []).map(c => (
+              <AnimatedCard key={c.id} card={c} small={true} isTapped={c.tapped} />
+            ))}
           </div>
           <div style={{ marginTop:12, opacity:0.85 }}>
             Cartas en mano: {opp.handCount || 0}
