@@ -6,6 +6,7 @@ import TrainingDashboard from './components/TrainingDashboard';
 export default function App(){
  const { state, setState } = useGameStore();
  const [name, setName] = useState('Jugador');
+ const [currentView, setCurrentView] = useState('home');
  useEffect(()=>{
  socket.on('game-created', ({ gameId, state }) => setState(state));
  socket.on('game-updated', (state)=> setState(state));
