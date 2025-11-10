@@ -1,8 +1,15 @@
 import express from 'express';
 import axios from 'axios';
 import NodeCache from 'node-cache';
+import TrainingSystem from '../game-engine/trainingSystem.js';
+import DeckImportService from '../services/deckImportService.js';
+
 const cache = new NodeCache({ stdTTL: 60 * 60 }); // 1h
 const router = express.Router();
+
+// Initialize services
+const trainingSystem = new TrainingSystem();
+const deckImportService = new DeckImportService();
 router.get('/card/:name', async (req, res) => {
  const name = req.params.name;
  const key = `card:${name}`;
