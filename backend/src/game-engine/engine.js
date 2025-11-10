@@ -1,6 +1,6 @@
 // backend/src/game-engine/engine.js
 import { v4 as uuid } from 'uuid';
-import Bot from './bot.js';
+import AdvancedBot from './advancedBot.js';
 import { starterDecks, createDeckFromNames, BOT_DECK_LIST } from './cards.js';
 
 const GAMES = new Map();
