@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import socket from './sockets/clientSocket';
 import { useGameStore } from './store/gameStore';
-import Board from './components/Board';
+import GameBoard from './components/GameBoard';
+import TrainingDashboard from './components/TrainingDashboard';
 export default function App(){
  const { state, setState } = useGameStore();
  const [name, setName] = useState('Jugador');
