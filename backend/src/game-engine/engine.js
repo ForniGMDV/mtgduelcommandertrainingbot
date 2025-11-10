@@ -1,9 +1,18 @@
 // backend/src/game-engine/engine.js
 import { v4 as uuid } from 'uuid';
-import Bot from './bot.js';
+import AdvancedBot from './advancedBot.js';
 import { starterDecks, createDeckFromNames, BOT_DECK_LIST } from './cards.js';
 
 const GAMES = new Map();
+
+function shuffleArray(array) {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+}
 
 export function createGame({ playerName, socketId, io }) {
   const id = uuid();
@@ -26,7 +35,9 @@ class Game {
     this.phase = 'begin';
     this.turn = 1;
     this.stack = [];
-    this.bot = new Bot(this);
+    this.bot = new AdvancedBot(this);
+    this.rulesEngine = null; // Will be initialized when needed
+    this.trainingSystem = null; // Will be initialized when needed
   }
 
   addPlayer({ playerName, socketId, isHuman, starter='A', customDeckNames = null }) {
@@ -56,6 +67,7 @@ class Game {
       commandZone: commander ? [commander] : [],
       commanderTaxCount: 0,
       landsPlayedThisTurn: 0,
+      manaPool: { total: 0, colors: { white: 0, blue: 0, black: 0, red: 0, green: 0 } },
       isHuman
     };
 
@@ -67,7 +79,92 @@ class Game {
     this.players.push(p);
   }
 
-  // ... (deja el resto de métodos que ya tenías) ...
+  findPlayerBySocket(socketId) {
+    return this.players.find(p => p.socketId === socketId);
+  }
+
+  // Enhanced action methods
+  _playLand(player, cardId) {
+    const land = player.hand.find(c => c.id === cardId && c.type?.includes('Land'));
+    if (!land) throw new Error('Land not found in hand');
+    if (player.landsPlayedThisTurn >= 1) throw new Error('Already played a land this turn');
+
+    player.hand = player.hand.filter(c => c.id !== cardId);
+    player.battlefield.push(land);
+    player.landsPlayedThisTurn++;
+
+    // Add basic mana generation
+    if (!player.manaPool) {
+      player.manaPool = { total: 0, colors: { white: 0, blue: 0, black: 0, red: 0, green: 0 } };
+    }
+    player.manaPool.total++;
+  }
+
+  _castSpell(player, cardId, fromCommandZone = false) {
+    const zone = fromCommandZone ? player.commandZone : player.hand;
+    const card = zone.find(c => c.id === cardId);
+    if (!card) throw new Error('Card not found');
+
+    const manaCost = card.manaCost || 0;
+    if (!player.manaPool || player.manaPool.total < manaCost) {
+      throw new Error('Not enough mana');
+    }
+
+    // Pay mana cost
+    player.manaPool.total -= manaCost;
+
+    // Remove from zone
+    const index = zone.indexOf(card);
+    zone.splice(index, 1);
+
+    // Add to stack
+    this.stack.push({
+      type: 'spell',
+      card: card,
+      controller: player,
+      fromCommandZone: fromCommandZone
+    });
+
+    // Update commander tax if applicable
+    if (fromCommandZone && card.isCommander) {
+      player.commanderTaxCount++;
+    }
+  }
+
+  _attack(player, attackers = []) {
+    const validAttackers = attackers.map(cardId => {
+      const creature = player.battlefield.find(c => c.id === cardId && c.type?.includes('Creature'));
+      if (!creature) throw new Error(`Creature ${cardId} not found`);
+      if (creature.tapped) throw new Error('Creature is tapped');
+      if (creature.summoningSick && !creature.haste) throw new Error('Creature has summoning sickness');
+      return creature;
+    });
+
+    // Tap attackers
+    validAttackers.forEach(creature => {
+      creature.tapped = true;
+      creature.isAttacking = true;
+    });
+
+    this.attackingCreatures = validAttackers;
+  }
+
+  _pass(player) {
+    // Reset mana pool at end of turn
+    if (player.manaPool) {
+      player.manaPool.total = 0;
+      player.manaPool.colors = { white: 0, blue: 0, black: 0, red: 0, green: 0 };
+    }
+
+    // Clear attack status
+    player.battlefield.forEach(creature => {
+      if (creature.type?.includes('Creature')) {
+        creature.isAttacking = false;
+        creature.isBlocking = false;
+        creature.summoningSick = false; // Creatures lose summoning sickness at end of turn
+      }
+    });
+  }
 
   // Añadimos acciones extra manejadas por applyAction:
   applyAction(action, socketId) {
