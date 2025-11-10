@@ -3,7 +3,7 @@ import React, { useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
 import socket from '../sockets/clientSocket';
 import Hand from './Hand';
-import Card from './Card';
+import AnimatedCard from './AnimatedCard';
 import Controls from './Controls';
 import DeckControls from './DeckControls';
 import DeckView from './DeckView';
