@@ -26,7 +26,9 @@ class Game {
     this.phase = 'begin';
     this.turn = 1;
     this.stack = [];
-    this.bot = new Bot(this);
+    this.bot = new AdvancedBot(this);
+    this.rulesEngine = null; // Will be initialized when needed
+    this.trainingSystem = null; // Will be initialized when needed
   }
 
   addPlayer({ playerName, socketId, isHuman, starter='A', customDeckNames = null }) {
