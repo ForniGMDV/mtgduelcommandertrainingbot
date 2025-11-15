@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import DeckImport from '../components/DeckImport'
 import StackedDeck from '../components/StackedDeck'
 
@@ -11,6 +11,8 @@ interface Card {
   toughness?: number
   text: string
   imageUrl?: string
+  x?: number
+  y?: number
 }
 
 interface PlayerState {
@@ -43,6 +45,8 @@ interface CardContextMenu {
   y: number
   zone: 'hand' | 'battlefield' | 'library' | 'graveyard' | 'exile'
 }
+
+const PHASES = ['Beginning', 'Main 1', 'Combat', 'Main 2', 'Ending']
 
 const DEFAULT_DECK: Card[] = [
   { id: '1', name: 'Ancient Den', manaCost: 0, type: 'Land', text: '', power: 0, toughness: 0, imageUrl: 'https://cards.scryfall.io/normal/front/3/0/301e15c8-7ff1-4ce0-85d5-5ff12eb06e6e.jpg' },
@@ -154,6 +158,8 @@ export default function GamePage() {
   const [showImport, setShowImport] = useState(false)
   const [showLibraryMenu, setShowLibraryMenu] = useState(false)
   const [contextMenu, setContextMenu] = useState<CardContextMenu | null>(null)
+  const [draggedCard, setDraggedCard] = useState<{ cardId: string; zone: string } | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
 
   const startGame = useCallback(async (playerDeck?: Card[]) => {
     setLoading(true)
@@ -218,6 +224,21 @@ export default function GamePage() {
     executeAction({ type: 'MoveCard', cardId, fromZone, toZone, playerId: 'player_1' })
     setContextMenu(null)
   }, [executeAction])
+
+  const updateCardPosition = useCallback((cardId: string, x: number, y: number, isOpponent: boolean) => {
+    if (!gameState) return
+    setGameState(prev => {
+      if (!prev) return prev
+      const updated = { ...prev }
+      const cards = isOpponent ? updated.opponent.battlefield : updated.player.battlefield
+      const card = cards.find(c => c.id === cardId)
+      if (card) {
+        card.x = x
+        card.y = y
+      }
+      return updated
+    })
+  }, [gameState])
 
   const handleImport = async (cards: any[]) => {
     setLoading(true)
@@ -315,363 +336,490 @@ export default function GamePage() {
   }
 
   return (
-    <div className="h-screen bg-gradient-to-br from-slate-900 to-black flex flex-col p-0.5 gap-0.5 overflow-hidden">
-      <div className="flex justify-between items-center h-5">
-        <div className="text-white text-xs">
-          <span className="text-purple-400 font-bold">Turn {gameState.turn}</span>
-          <span className="text-gray-500 mx-2">•</span>
-          <span className={gameState.isPlayerTurn ? 'text-green-400 font-bold' : 'text-orange-400'}>
-            {gameState.isPlayerTurn ? 'Your Turn' : 'Opponent'}
-          </span>
+    <div style={{
+      backgroundColor: '#4f506b'
+    }} className="h-screen w-screen flex flex-col overflow-hidden cursor-default select-none">
+
+      <div className="h-12 bg-black/70 border-b border-gray-700 flex items-center justify-between px-6">
+        <div className="text-white font-bold">{gameState?.opponent.name || 'Opponent'} - {gameState?.opponent.life || 0} HP</div>
+        <div className={`text-lg font-bold ${gameState?.isPlayerTurn ? 'text-green-400' : 'text-orange-400'}`}>
+          Turn {gameState?.turn || 0} - {gameState?.isPlayerTurn ? 'Your Turn' : `${gameState?.opponent.name}'s Turn`}
         </div>
-        {error && <div className="text-red-400 text-xs">{error}</div>}
+        <div className="text-white font-bold">{gameState?.player.name || 'Player'} - {gameState?.player.life || 0} HP</div>
       </div>
 
-      <div className="flex-1 flex flex-col gap-0 overflow-hidden">
-        <div className="h-1/2 flex flex-col gap-0.5 overflow-hidden">
-          <div className="flex gap-0">
-            <div className="w-28 flex flex-col gap-0 text-center">
-              <div className="relative">
-                <div onClick={() => setShowLibraryMenu(!showLibraryMenu)} className="bg-gray-900/30 rounded p-1 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-900/50 w-28 h-32">
-                  <div className="relative w-16 h-24">
-                    <div className="absolute w-full h-full bg-blue-600 rounded border-2 border-blue-400" style={{ transform: 'translateY(0px)' }}></div>
-                    <div className="absolute w-full h-full bg-blue-600 rounded border-2 border-blue-400" style={{ transform: 'translateY(2px) translateX(1px)' }}></div>
-                    <div className="absolute w-full h-full bg-blue-600 rounded border-2 border-blue-400" style={{ transform: 'translateY(4px) translateX(2px)' }}></div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-white font-bold text-xs">{gameState.opponent.library.length}</span>
-                    </div>
-                  </div>
-                </div>
-                {showLibraryMenu && (
-                  <div className="absolute top-full mt-1 left-0 bg-gray-800 rounded border border-purple-500 shadow-lg z-50 text-xs">
-                    <button
-                      onClick={() => {
-                        setShowLibraryMenu(false)
-                      }}
-                      className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 font-bold text-xs"
-                    >
-                      📥 Bot Deck
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 flex flex-col min-h-0 bg-gray-900/30 rounded p-0.5 border border-gray-700 overflow-hidden">
-                <div className="text-gray-400 text-xs font-bold mb-0.5">⚰️</div>
-                <div className="flex-1 flex flex-col gap-0.5 overflow-y-auto">
-                  {gameState.opponent.graveyard.map((card) => (
-                    <div key={card.id} draggable onContextMenu={(e) => { e.preventDefault(); setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'graveyard' }); }} className="w-16 h-24 bg-gray-700 rounded border border-gray-500 flex items-center justify-center text-xs overflow-hidden cursor-context-menu flex-shrink-0">
-                      {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover opacity-60" /> : <div className="text-center text-gray-300 font-bold text-xs p-1">{card.name}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex-1 flex flex-col min-h-0 bg-gray-900/30 rounded p-0.5 border border-gray-700 overflow-hidden">
-                <div className="text-gray-400 text-xs font-bold mb-0.5">🔒</div>
-                <div className="flex-1 flex flex-col gap-0.5 overflow-y-auto">
-                  {gameState.opponent.exile.map((card) => (
-                    <div key={card.id} draggable onContextMenu={(e) => { e.preventDefault(); setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'exile' }); }} className="w-16 h-24 bg-blue-900/30 rounded border border-blue-500 flex items-center justify-center text-xs overflow-hidden cursor-context-menu flex-shrink-0">
-                      {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" /> : <div className="text-center text-blue-300 font-bold text-xs p-1">{card.name}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <OpponentArea gameState={gameState} setContextMenu={setContextMenu} setShowLibraryMenu={setShowLibraryMenu} showLibraryMenu={showLibraryMenu} setDraggedCard={setDraggedCard} draggedCard={draggedCard} moveCard={moveCard} updateCardPosition={updateCardPosition} />
 
-            <div className="flex-1 flex flex-col gap-0 overflow-hidden">
-              <div className="text-center bg-gray-900/30 rounded p-0.5 border border-gray-700 text-xs">
-                <div className="text-red-400 font-bold text-xs">{gameState.opponent.name} • {gameState.opponent.life} ❤️</div>
-                <div className="text-blue-400 text-xs">💎 {gameState.opponent.mana}/{gameState.opponent.maxMana}</div>
-              </div>
+        <PlayArea gameState={gameState} currentPhase={gameState.currentPhase} />
 
-              <div className="bg-gray-900/30 rounded p-1 border border-gray-700 flex flex-col">
-                <div className="text-gray-400 text-xs font-bold">🖐️ ({gameState.opponent.hand.length})</div>
-                <div className="flex gap-1 flex-nowrap">
-                  {Array.from({ length: gameState.opponent.hand.length }).map((_, i) => (
-                    <div key={`bot-hand-${i}`} className="flex-shrink-0 w-16 h-24 bg-blue-900/40 rounded border-2 border-blue-500 flex items-center justify-center text-sm text-blue-300 font-bold">
-                      🔒
-                    </div>
-                  ))}
-                </div>
-              </div>
+        <PlayerArea gameState={gameState} setContextMenu={setContextMenu} playCard={playCard} setShowLibraryMenu={setShowLibraryMenu} showLibraryMenu={showLibraryMenu} drawCard={drawCard} shuffleDeck={shuffleDeck} setDraggedCard={setDraggedCard} draggedCard={draggedCard} moveCard={moveCard} updateCardPosition={updateCardPosition} />
+      </div>
 
-              <div className="flex-shrink-0 flex gap-0.5 bg-gray-900/30 rounded p-0.5 border border-gray-700">
-                <div className="flex gap-1 items-start flex-wrap content-start">
-                  <div className="w-24 bg-gray-900/30 rounded p-1 border border-gray-700 flex flex-col items-center justify-center overflow-hidden flex-shrink-0">
-                    {gameState.opponent.commander && (
-                      <div draggable className="w-20 h-32 flex-shrink-0 bg-yellow-900/30 rounded border-2 border-yellow-500 flex items-center justify-center text-xs text-yellow-300 text-center p-1 font-bold overflow-hidden relative">
-                      {gameState.opponent.commander.imageUrl ? (
-                        <>
-                          <img src={gameState.opponent.commander.imageUrl} alt={gameState.opponent.commander.name} className="w-full h-full object-cover" />
-                          <div className="absolute top-0 left-0 w-full bg-yellow-400 text-black text-xs font-bold p-0.5">👑</div>
-                        </>
-                      ) : (
-                        <div className="text-yellow-400 font-bold">👑</div>
-                      )}
-                    </div>
-                  )}
-                </div>
+      <GameControls gameState={gameState} endTurn={endTurn} startGame={startGame} DEFAULT_DECK={DEFAULT_DECK} setShowImport={setShowImport} />
 
-                  <div className="flex flex-col gap-0.5">
-                    <div className="bg-gray-900/30 rounded p-1 border border-gray-700 flex flex-col">
-                      <div className="text-gray-400 text-xs font-bold mb-0.5">Lands</div>
-                      <div className="flex gap-1 bg-gray-800/30 rounded p-1 border border-dashed border-gray-600 items-start content-start flex-wrap">
-                        {gameState.opponent.battlefield.filter(card => card.type.includes('Land')).map((card) => (
-                          <div key={card.id} draggable className="flex-shrink-0 w-16 h-24 bg-green-900/30 rounded border-2 border-green-700 flex items-center justify-center text-xs text-green-300 text-center p-1 font-bold overflow-hidden">
-                            {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" /> : <div>{card.name}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+      {showImport && <DeckImport onImport={handleImport} onClose={() => setShowImport(false)} />}
 
-                    <div className="bg-gray-900/30 rounded p-1 border border-gray-700 flex flex-col">
-                      <div className="text-gray-400 text-xs font-bold mb-0.5">Creatures</div>
-                      <div className="flex gap-1 bg-gray-800/30 rounded p-1 border border-dashed border-gray-600 items-start content-start flex-wrap">
-                        {gameState.opponent.battlefield.filter(card => !card.type.includes('Land')).map((card) => (
-                          <div key={card.id} draggable className="flex-shrink-0 w-16 h-24 bg-red-900/20 rounded border-2 border-red-600 flex items-center justify-center text-xs text-red-300 text-center p-1 font-bold overflow-hidden">
-                            {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" /> : <div>{card.name}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+      {contextMenu && (
+        <CardContextMenuComponent 
+          contextMenu={contextMenu} 
+          gameState={gameState}
+          setContextMenu={setContextMenu}
+          moveCard={moveCard}
+        />
+      )}
+    </div>
+  )
+}
+
+function DraggableCard({ card, zone, setContextMenu, setDraggedCard, containerRef, updateCardPosition, isOpponent }: any) {
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    setIsDragging(true)
+    setDragStart({ x: e.clientX, y: e.clientY })
+  }
+
+  useEffect(() => {
+    if (!isDragging) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const deltaX = e.clientX - dragStart.x
+      const deltaY = e.clientY - dragStart.y
+      const newX = Math.max(0, Math.min((card.x || 0) + deltaX, rect.width - 60))
+      const newY = Math.max(0, Math.min((card.y || 0) + deltaY, rect.height - 80))
+      
+      card.x = newX
+      card.y = newY
+      setDragStart({ x: e.clientX, y: e.clientY })
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+      updateCardPosition()
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging, dragStart, card, containerRef, updateCardPosition])
+
+  return (
+    <div
+      onMouseDown={handleMouseDown}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone })
+      }}
+      className="absolute w-14 h-20 bg-gray-700 rounded border border-gray-500 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
+      style={{
+        left: `${card.x || 0}px`,
+        top: `${card.y || 0}px`
+      }}
+    >
+      {card.imageUrl ? (
+        <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" />
+      ) : (
+        <div className="text-gray-300 font-bold text-xs text-center">{card.name}</div>
+      )}
+    </div>
+  )
+}
+
+function OpponentArea({ gameState, setContextMenu, setShowLibraryMenu, showLibraryMenu, setDraggedCard, draggedCard, moveCard, updateCardPosition }: any) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  
+  return (
+    <div className="flex-1 flex gap-2 bg-black/20 p-2 overflow-hidden">
+      <div className="w-20 flex flex-col gap-2">
+        <StackedDeckDisplay count={gameState.opponent.library.length} />
+        <div className="flex-1 flex flex-col gap-1 min-h-0">
+          <div className="text-xs text-gray-300 font-bold">⚰️ {gameState.opponent.graveyard.length}</div>
+          <div className="flex-1 overflow-y-auto flex flex-col gap-1">
+            {gameState.opponent.graveyard.slice(-3).map((card: Card) => (
+              <SmallCardDisplay key={card.id} card={card} zone="graveyard" setContextMenu={setContextMenu} setDraggedCard={setDraggedCard} />
+            ))}
           </div>
         </div>
-
-        <div className="h-1/2 flex flex-col gap-0.5 overflow-hidden">
-          <div className="flex gap-0">
-            <div className="flex-1 flex flex-col gap-0 overflow-hidden">
-              <div className="text-center bg-gray-900/30 rounded p-0.5 border border-gray-700 text-xs">
-                <div className="text-green-400 font-bold text-xs">{gameState.player.name} • {gameState.player.life} ❤️</div>
-                <div className="text-blue-400 text-xs">💎 {gameState.player.mana}/{gameState.player.maxMana}</div>
-              </div>
-
-              <div className="flex-shrink-0 flex gap-0.5 bg-gray-900/30 rounded p-0.5 border border-gray-700">
-                <div className="flex gap-1 items-start flex-wrap content-start">
-                  <div className="flex flex-col gap-0.5">
-                    <div className="bg-gray-900/30 rounded p-1 border border-gray-700 flex flex-col">
-                      <div className="text-gray-400 text-xs font-bold mb-0.5">Creatures</div>
-                      <div className="flex gap-1 bg-gray-800/30 rounded p-1 border border-dashed border-gray-600 items-start content-start flex-wrap">
-                        {gameState.player.battlefield.filter(card => !card.type.includes('Land')).map((card) => (
-                          <div key={card.id} draggable onContextMenu={(e) => { e.preventDefault(); setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'battlefield' }); }} className="flex-shrink-0 w-16 h-24 bg-green-900/20 rounded border-2 border-green-600 flex items-center justify-center text-xs text-green-300 text-center p-1 font-bold overflow-hidden cursor-context-menu">
-                            {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" /> : <div>{card.name}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-900/30 rounded p-1 border border-gray-700 flex flex-col">
-                      <div className="text-gray-400 text-xs font-bold mb-0.5">Lands</div>
-                      <div className="flex gap-1 bg-gray-800/30 rounded p-1 border border-dashed border-gray-600 items-start content-start flex-wrap">
-                        {gameState.player.battlefield.filter(card => card.type.includes('Land')).map((card) => (
-                          <div key={card.id} draggable onContextMenu={(e) => { e.preventDefault(); setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'battlefield' }); }} className="flex-shrink-0 w-16 h-24 bg-green-900/30 rounded border-2 border-green-700 flex items-center justify-center text-xs text-green-300 text-center p-1 font-bold overflow-hidden cursor-context-menu">
-                            {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" /> : <div>{card.name}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="w-24 bg-gray-900/30 rounded p-1 border border-gray-700 flex flex-col items-center justify-center overflow-hidden flex-shrink-0">
-                    {gameState.player.commander && (
-                      <div key={gameState.player.commander.id} draggable onContextMenu={(e) => { e.preventDefault(); setContextMenu({ cardId: gameState.player.commander!.id, x: e.clientX, y: e.clientY, zone: 'battlefield' }); }} className="w-20 h-32 flex-shrink-0 bg-yellow-900/30 rounded border-2 border-yellow-500 flex items-center justify-center text-xs text-yellow-300 text-center p-1 font-bold overflow-hidden relative cursor-context-menu">
-                        {gameState.player.commander.imageUrl ? (
-                          <>
-                            <img src={gameState.player.commander.imageUrl} alt={gameState.player.commander.name} className="w-full h-full object-cover" />
-                            <div className="absolute top-0 left-0 w-full bg-yellow-400 text-black text-xs font-bold p-0.5">👑</div>
-                          </>
-                        ) : (
-                          <div className="text-yellow-400 font-bold">👑</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex-shrink-0 bg-gray-900/30 rounded p-0.5 border border-gray-700 flex flex-col">
-                <div className="text-gray-400 text-xs font-bold text-center text-2xs">🖐️</div>
-                <div className="flex gap-0.5 flex-nowrap justify-center flex-wrap">
-                  {gameState.player.hand.map((card) => (
-                    <div
-                      key={card.id}
-                      draggable
-                      onContextMenu={(e) => {
-                        e.preventDefault()
-                        setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'hand' })
-                      }}
-                      onClick={() => gameState.isPlayerTurn && playCard(card.id)}
-                      className={`flex-shrink-0 w-16 h-24 rounded border-2 flex flex-col items-center justify-center text-xs text-center p-1 font-bold cursor-pointer transition overflow-hidden ${
-                        gameState.isPlayerTurn 
-                          ? 'border-purple-500 hover:border-purple-300 hover:shadow-lg hover:shadow-purple-500/50' 
-                          : 'border-gray-600 opacity-50'
-                      }`}
-                      title={gameState.isPlayerTurn ? 'Click to play or right-click' : 'Waiting...'}
-                    >
-                      {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" /> : <><div className="font-bold text-purple-300 text-xs">{card.name}</div><div className="text-xs text-blue-300">💎 {card.manaCost}</div></>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="w-28 flex flex-col gap-0 text-center">
-              <div className="relative">
-                <div onClick={() => setShowLibraryMenu(!showLibraryMenu)} className="bg-gray-900/30 rounded p-1 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-900/50 w-28 h-32">
-                  <div className="relative w-16 h-24">
-                    <div className="absolute w-full h-full bg-green-600 rounded border-2 border-green-400" style={{ transform: 'translateY(0px)' }}></div>
-                    <div className="absolute w-full h-full bg-green-600 rounded border-2 border-green-400" style={{ transform: 'translateY(2px) translateX(1px)' }}></div>
-                    <div className="absolute w-full h-full bg-green-600 rounded border-2 border-green-400" style={{ transform: 'translateY(4px) translateX(2px)' }}></div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-white font-bold text-xs">{gameState.player.library.length}</span>
-                    </div>
-                  </div>
-                </div>
-                {showLibraryMenu && (
-                  <div className="absolute top-full mt-1 left-0 bg-gray-800 rounded border border-purple-500 shadow-lg z-50 min-w-32 text-xs">
-                    <button
-                      onClick={() => {
-                        drawCard()
-                        setShowLibraryMenu(false)
-                      }}
-                      className="block w-full px-1 py-0.5 text-left text-white hover:bg-purple-600 font-bold text-xs"
-                    >
-                      📥 Draw
-                    </button>
-                    <button
-                      onClick={() => {
-                        shuffleDeck()
-                        setShowLibraryMenu(false)
-                      }}
-                      className="block w-full px-1 py-0.5 text-left text-white hover:bg-purple-600 font-bold border-t border-gray-600 text-xs"
-                    >
-                      🔀 Shuffle
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 flex flex-col min-h-0 bg-gray-900/30 rounded p-0.5 border border-gray-700 overflow-hidden">
-                <div className="text-gray-400 text-xs font-bold mb-0.5">⚰️</div>
-                <div className="flex-1 flex flex-col gap-0.5 overflow-y-auto">
-                  {gameState.player.graveyard.map((card) => (
-                    <div key={card.id} draggable onContextMenu={(e) => { e.preventDefault(); setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'graveyard' }); }} className="w-16 h-24 bg-gray-700 rounded border border-gray-500 flex items-center justify-center text-xs overflow-hidden cursor-context-menu flex-shrink-0">
-                      {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover opacity-60" /> : <div className="text-center text-gray-300 font-bold text-xs p-1">{card.name}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex-1 flex flex-col min-h-0 bg-gray-900/30 rounded p-0.5 border border-gray-700 overflow-hidden">
-                <div className="text-gray-400 text-xs font-bold mb-0.5">🔒</div>
-                <div className="flex-1 flex flex-col gap-0.5 overflow-y-auto">
-                  {gameState.player.exile.map((card) => (
-                    <div key={card.id} draggable onContextMenu={(e) => { e.preventDefault(); setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'exile' }); }} className="w-16 h-24 bg-blue-900/30 rounded border border-blue-500 flex items-center justify-center text-xs overflow-hidden cursor-context-menu flex-shrink-0">
-                      {card.imageUrl ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" /> : <div className="text-center text-blue-300 font-bold text-xs p-1">{card.name}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+        <div className="flex-1 flex flex-col gap-1 min-h-0">
+          <div className="text-xs text-gray-300 font-bold">🔒 {gameState.opponent.exile.length}</div>
+          <div className="flex-1 overflow-y-auto flex flex-col gap-1">
+            {gameState.opponent.exile.slice(-3).map((card: Card) => (
+              <SmallCardDisplay key={card.id} card={card} zone="exile" setContextMenu={setContextMenu} setDraggedCard={setDraggedCard} />
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="flex gap-0.5 justify-end h-5">
+      <div className="flex-1 flex flex-col gap-2 overflow-hidden">
+        <div className="bg-black/30 rounded border border-gray-600 p-2">
+          <div className="text-xs text-gray-400">🖐️ Hand ({gameState.opponent.hand.length})</div>
+          <div className="flex gap-1 flex-wrap">
+            {Array.from({ length: Math.min(gameState.opponent.hand.length, 6) }).map((_, i) => (
+              <div key={`opp-hand-${i}`} className="w-12 h-16 bg-blue-600/40 rounded border border-blue-400 flex items-center justify-center text-xs text-blue-200">
+                🔒
+              </div>
+            ))}
+          </div>
+        </div>
+        <div 
+          ref={containerRef}
+          className="flex-1 bg-gradient-to-br from-gray-900 to-black rounded border-2 border-gray-700 p-2 overflow-hidden relative"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            if (draggedCard && containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect()
+              const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width - 60))
+              const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height - 80))
+              if (draggedCard.zone !== 'battlefield') {
+                moveCard(draggedCard.cardId, draggedCard.zone, 'battlefield')
+              }
+              updateCardPosition(draggedCard.cardId, x, y, true)
+            }
+          }}
+        >
+          <div className="text-xs text-gray-500 mb-1">Opponent Battlefield</div>
+          {gameState.opponent.battlefield.map((card: Card) => (
+            <DraggableCard 
+              key={card.id} 
+              card={card} 
+              zone="battlefield" 
+              setContextMenu={setContextMenu} 
+              setDraggedCard={setDraggedCard}
+              containerRef={containerRef}
+              updateCardPosition={() => updateCardPosition(card.id, card.x || 0, card.y || 0, true)}
+              isOpponent={true}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PlayArea({ gameState, currentPhase }: any) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-black/50 px-4 py-2">
+      <div className="flex gap-2">
+        {PHASES.map((phase) => (
+          <button
+            key={phase}
+            className={`px-4 py-2 rounded text-sm font-bold transition ${
+              currentPhase === phase
+                ? 'bg-purple-600 text-white border border-purple-400'
+                : 'bg-gray-700 text-gray-300 border border-gray-600 hover:bg-gray-600'
+            }`}
+          >
+            {phase}
+          </button>
+        ))}
+      </div>
+
+      {gameState.stack.length > 0 && (
+        <div className="text-lg text-yellow-400 font-bold">
+          📚 Stack: {gameState.stack.length}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PlayerArea({ gameState, setContextMenu, playCard, setShowLibraryMenu, showLibraryMenu, drawCard, shuffleDeck, setDraggedCard, draggedCard, moveCard, updateCardPosition }: any) {
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  return (
+    <div className="flex-1 flex gap-2 bg-black/20 p-2 overflow-hidden">
+      <div className="w-20 flex flex-col gap-2">
+        <StackedDeckDisplay count={gameState.player.library.length} onClick={setShowLibraryMenu} />
+        {showLibraryMenu && (
+          <div className="bg-gray-800 rounded border border-purple-500 shadow-lg absolute z-50 mt-28">
+            <button onClick={drawCard} className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 text-xs font-bold">
+              📥 Draw
+            </button>
+            <button onClick={shuffleDeck} className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 text-xs font-bold border-t border-gray-600">
+              🔀 Shuffle
+            </button>
+          </div>
+        )}
+        <div className="flex-1 flex flex-col gap-1 min-h-0">
+          <div className="text-xs text-gray-300 font-bold">⚰️ {gameState.player.graveyard.length}</div>
+          <div 
+            className="flex-1 overflow-y-auto flex flex-col gap-1"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (draggedCard) moveCard(draggedCard.cardId, draggedCard.zone, 'graveyard')
+            }}
+          >
+            {gameState.player.graveyard.slice(-3).map((card: Card) => (
+              <SmallCardDisplay key={card.id} card={card} zone="graveyard" setContextMenu={setContextMenu} setDraggedCard={setDraggedCard} />
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col gap-1 min-h-0">
+          <div className="text-xs text-gray-300 font-bold">🔒 {gameState.player.exile.length}</div>
+          <div 
+            className="flex-1 overflow-y-auto flex flex-col gap-1"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (draggedCard) moveCard(draggedCard.cardId, draggedCard.zone, 'exile')
+            }}
+          >
+            {gameState.player.exile.slice(-3).map((card: Card) => (
+              <SmallCardDisplay key={card.id} card={card} zone="exile" setContextMenu={setContextMenu} setDraggedCard={setDraggedCard} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col gap-2 overflow-hidden">
+        <div 
+          ref={containerRef}
+          className="flex-1 bg-gradient-to-br from-gray-900 to-black rounded border-2 border-gray-700 p-2 overflow-hidden relative"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            if (draggedCard && containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect()
+              const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width - 60))
+              const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height - 80))
+              if (draggedCard.zone !== 'battlefield') {
+                moveCard(draggedCard.cardId, draggedCard.zone, 'battlefield')
+              }
+              updateCardPosition(draggedCard.cardId, x, y, false)
+            }
+          }}
+        >
+          <div className="text-xs text-gray-500 mb-1">Your Battlefield</div>
+          {gameState.player.battlefield.map((card: Card) => (
+            <DraggableCard 
+              key={card.id} 
+              card={card} 
+              zone="battlefield" 
+              setContextMenu={setContextMenu} 
+              setDraggedCard={setDraggedCard}
+              containerRef={containerRef}
+              updateCardPosition={() => updateCardPosition(card.id, card.x || 0, card.y || 0, false)}
+              isOpponent={false}
+            />
+          ))}
+        </div>
+
+        <div className="bg-black/30 rounded border border-purple-500 p-2 h-28 overflow-hidden">
+          <div className="text-xs text-gray-400 mb-1">🖐️ Hand ({gameState.player.hand.length})</div>
+          <div 
+            className="flex gap-1 overflow-x-auto h-full"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (draggedCard) moveCard(draggedCard.cardId, draggedCard.zone, 'hand')
+            }}
+          >
+            {gameState.player.hand.map((card: Card) => (
+              <div
+                key={card.id}
+                draggable
+                onDragStart={() => setDraggedCard({ cardId: card.id, zone: 'hand' })}
+                onDragEnd={() => setDraggedCard(null)}
+                onClick={() => gameState.isPlayerTurn && playCard(card.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone: 'hand' })
+                }}
+                className={`flex-shrink-0 w-14 h-20 rounded border-2 flex items-center justify-center text-xs overflow-hidden cursor-move transition ${
+                  gameState.isPlayerTurn
+                    ? 'border-purple-500 hover:border-purple-300 hover:shadow-lg hover:shadow-purple-500/50 hover:opacity-80'
+                    : 'border-gray-600 opacity-50'
+                }`}
+              >
+                {card.imageUrl ? (
+                  <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="text-center text-purple-300">
+                    <div className="font-bold text-xs">{card.name}</div>
+                    <div className="text-blue-300">💎 {card.manaCost}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GameControls({ gameState, endTurn, startGame, DEFAULT_DECK, setShowImport }: any) {
+  return (
+    <div className="h-12 bg-black/50 border-t border-gray-700 flex items-center justify-between px-4 gap-2">
+      <div className="text-sm text-gray-400">MTG Duel - Commander</div>
+      <div className="flex gap-2">
         <button
           onClick={() => setShowImport(true)}
-          className="px-1 py-0.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition"
+          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded transition"
         >
           📥 Import
         </button>
         {gameState.isPlayerTurn && (
           <button
             onClick={endTurn}
-            className="px-1 py-0.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs transition"
+            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded transition"
           >
             🏁 End Turn
           </button>
         )}
         <button
           onClick={() => startGame(DEFAULT_DECK)}
-          className="px-1 py-0.5 bg-gray-600 hover:bg-gray-700 text-white font-bold rounded text-xs transition"
+          className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold rounded transition"
         >
           🔄 New Game
         </button>
       </div>
+    </div>
+  )
+}
 
-      {showImport && <DeckImport onImport={handleImport} onClose={() => setShowImport(false)} />}
-
-      {contextMenu && (() => {
-        const card = contextMenu.zone === 'battlefield' 
-          ? gameState.player.battlefield.find(c => c.id === contextMenu.cardId) || gameState.opponent.battlefield.find(c => c.id === contextMenu.cardId)
-          : contextMenu.zone === 'hand'
-          ? gameState.player.hand.find(c => c.id === contextMenu.cardId) || gameState.opponent.hand.find(c => c.id === contextMenu.cardId)
-          : contextMenu.zone === 'graveyard'
-          ? gameState.player.graveyard.find(c => c.id === contextMenu.cardId) || gameState.opponent.graveyard.find(c => c.id === contextMenu.cardId)
-          : contextMenu.zone === 'exile'
-          ? gameState.player.exile.find(c => c.id === contextMenu.cardId) || gameState.opponent.exile.find(c => c.id === contextMenu.cardId)
-          : null
-        
-        const isLand = card?.type.includes('Land')
-        
-        return (
+function StackedDeckDisplay({ count, onClick }: any) {
+  return (
+    <div
+      onClick={onClick}
+      className="bg-blue-600/20 rounded border border-blue-500 p-2 cursor-pointer hover:bg-blue-600/30 transition h-20 flex items-center justify-center"
+    >
+      <div className="relative w-12 h-16">
+        {[0, 1, 2].map((i) => (
           <div
-            className="fixed bg-gray-800 rounded border border-purple-500 shadow-lg z-50 py-1 min-w-40"
-            style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
-            onMouseLeave={() => setContextMenu(null)}
-          >
-            {contextMenu.zone === 'battlefield' && isLand && (
-              <button
-                onClick={() => moveCard(contextMenu.cardId, 'battlefield', 'battlefield')}
-                className="block w-full px-4 py-2 text-left text-white hover:bg-purple-600 text-sm font-bold border-b border-gray-600"
-              >
-                🗡️ To Creatures
-              </button>
-            )}
-            {contextMenu.zone === 'battlefield' && !isLand && (
-              <button
-                onClick={() => moveCard(contextMenu.cardId, 'battlefield', 'battlefield')}
-                className="block w-full px-4 py-2 text-left text-white hover:bg-purple-600 text-sm font-bold border-b border-gray-600"
-              >
-                🌲 To Lands
-              </button>
-            )}
-            {contextMenu.zone !== 'graveyard' && (
-              <button
-                onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'graveyard')}
-                className="block w-full px-4 py-2 text-left text-white hover:bg-purple-600 text-sm font-bold border-b border-gray-600"
-              >
-                ⚰️ To Graveyard
-              </button>
-            )}
-            {contextMenu.zone !== 'exile' && (
-              <button
-                onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'exile')}
-                className="block w-full px-4 py-2 text-left text-white hover:bg-purple-600 text-sm font-bold border-b border-gray-600"
-              >
-                🔒 To Exile
-              </button>
-            )}
-            {contextMenu.zone !== 'library' && (
-              <button
-                onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'library')}
-                className="block w-full px-4 py-2 text-left text-white hover:bg-purple-600 text-sm font-bold border-b border-gray-600"
-              >
-                📚 To Library
-              </button>
-            )}
-            {contextMenu.zone !== 'hand' && (
-              <button
-                onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'hand')}
-                className="block w-full px-4 py-2 text-left text-white hover:bg-purple-600 text-sm font-bold"
-              >
-                🖐️ To Hand
-              </button>
-            )}
-          </div>
-        )
-      })()}
+            key={i}
+            className="absolute w-full h-full bg-blue-600 rounded border border-blue-400"
+            style={{ transform: `translateY(${i * 2}px) translateX(${i * 1}px)` }}
+          />
+        ))}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-white font-bold text-xs">{count}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SmallCardDisplay({ card, zone, setContextMenu, setDraggedCard }: any) {
+  return (
+    <div
+      draggable
+      onDragStart={() => setDraggedCard({ cardId: card.id, zone })}
+      onDragEnd={() => setDraggedCard(null)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone })
+      }}
+      className="w-full h-12 bg-gray-700 rounded border border-gray-500 flex items-center justify-center overflow-hidden cursor-move text-xs hover:opacity-80"
+    >
+      {card.imageUrl ? (
+        <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover opacity-70" />
+      ) : (
+        <div className="text-gray-300 font-bold text-xs text-center px-1">{card.name}</div>
+      )}
+    </div>
+  )
+}
+
+function CardThumbnail({ card, zone, setContextMenu, setDraggedCard }: any) {
+  return (
+    <div
+      draggable
+      onDragStart={() => setDraggedCard({ cardId: card.id, zone })}
+      onDragEnd={() => setDraggedCard(null)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setContextMenu({ cardId: card.id, x: e.clientX, y: e.clientY, zone })
+      }}
+      className="w-14 h-20 bg-gray-700 rounded border border-gray-500 flex items-center justify-center overflow-hidden cursor-move flex-shrink-0 hover:opacity-80"
+    >
+      {card.imageUrl ? (
+        <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" />
+      ) : (
+        <div className="text-gray-300 font-bold text-xs text-center">{card.name}</div>
+      )}
+    </div>
+  )
+}
+
+function CardContextMenuComponent({ contextMenu, gameState, setContextMenu, moveCard }: any) {
+  const card = contextMenu.zone === 'battlefield'
+    ? gameState.player.battlefield.find((c: Card) => c.id === contextMenu.cardId) || gameState.opponent.battlefield.find((c: Card) => c.id === contextMenu.cardId)
+    : contextMenu.zone === 'hand'
+    ? gameState.player.hand.find((c: Card) => c.id === contextMenu.cardId) || gameState.opponent.hand.find((c: Card) => c.id === contextMenu.cardId)
+    : contextMenu.zone === 'graveyard'
+    ? gameState.player.graveyard.find((c: Card) => c.id === contextMenu.cardId) || gameState.opponent.graveyard.find((c: Card) => c.id === contextMenu.cardId)
+    : contextMenu.zone === 'exile'
+    ? gameState.player.exile.find((c: Card) => c.id === contextMenu.cardId) || gameState.opponent.exile.find((c: Card) => c.id === contextMenu.cardId)
+    : null
+
+  const isLand = card?.type.includes('Land')
+
+  return (
+    <div
+      className="fixed bg-gray-800 rounded border border-purple-500 shadow-lg z-50 py-1 min-w-40 text-xs"
+      style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+      onMouseLeave={() => setContextMenu(null)}
+    >
+      {contextMenu.zone === 'battlefield' && isLand && (
+        <button
+          onClick={() => moveCard(contextMenu.cardId, 'battlefield', 'battlefield')}
+          className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 font-bold border-b border-gray-600"
+        >
+          🗡️ To Creatures
+        </button>
+      )}
+      {contextMenu.zone === 'battlefield' && !isLand && (
+        <button
+          onClick={() => moveCard(contextMenu.cardId, 'battlefield', 'battlefield')}
+          className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 font-bold border-b border-gray-600"
+        >
+          🌲 To Lands
+        </button>
+      )}
+      {contextMenu.zone !== 'graveyard' && (
+        <button
+          onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'graveyard')}
+          className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 font-bold border-b border-gray-600"
+        >
+          ⚰️ To Graveyard
+        </button>
+      )}
+      {contextMenu.zone !== 'exile' && (
+        <button
+          onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'exile')}
+          className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 font-bold border-b border-gray-600"
+        >
+          🔒 To Exile
+        </button>
+      )}
+      {contextMenu.zone !== 'library' && (
+        <button
+          onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'library')}
+          className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 font-bold border-b border-gray-600"
+        >
+          📚 To Library
+        </button>
+      )}
+      {contextMenu.zone !== 'hand' && (
+        <button
+          onClick={() => moveCard(contextMenu.cardId, contextMenu.zone, 'hand')}
+          className="block w-full px-2 py-1 text-left text-white hover:bg-purple-600 font-bold"
+        >
+          🖐️ To Hand
+        </button>
+      )}
     </div>
   )
 }
