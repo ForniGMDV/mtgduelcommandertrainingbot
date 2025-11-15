@@ -1,0 +1,20 @@
+{
+  "name": "bettermtgbot",
+  "version": "1.0.0",
+  "description": "Magic: The Gathering Duel Commander with AI bot",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend",
+    "ai"
+  ],
+  "scripts": {
+    "dev": "powershell -ExecutionPolicy Bypass -File dev.ps1",
+    "stop-dev": "powershell -ExecutionPolicy Bypass -File stop-dev.ps1",
+    "dev:workspaces": "npm run dev --workspaces",
+    "build": "npm run build --workspaces",
+    "start": "npm start --workspaces",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces"
+  }
+}
